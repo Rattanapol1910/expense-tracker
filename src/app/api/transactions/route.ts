@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+// ปกติฝั่งที่ไม่ใช่ผู้อัพโหลดเป็นคนตอบ แต่ถ้ามีการเคลม (claimed_by) ผู้อัพโหลดเดิมเป็นคนตอบ
+const needsMyResponse = (t: any, uid: string) =>
+  t.status === "pending" && (t.claimed_by ? t.uploaded_by === uid : t.uploaded_by !== uid);
+
 // GET ?from=ISO&to=ISO — รวมรายการเพิ่มเอง + รายการโอน (ผู้โอน=รายจ่าย / ผู้รับ=รายรับ)
 export async function GET(request: Request) {
   const supabase = createClient();
@@ -43,7 +47,7 @@ export async function GET(request: Request) {
       occurredAt: t.transferred_at,
       status: t.status as "pending" | "confirmed",
       counterparty: (Array.isArray(other) ? other[0] : other)?.display_name ?? null,
-      needsMyResponse: t.status === "pending" && t.uploaded_by !== user.id,
+      needsMyResponse: needsMyResponse(t, user.id),
     };
   });
 

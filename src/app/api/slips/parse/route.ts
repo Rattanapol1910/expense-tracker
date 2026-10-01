@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseSlip, SlipError } from "@/lib/slip/parser";
 import { matchParty } from "@/lib/slip/matcher";
-import { findTransferByRef } from "@/lib/slip/dedupe";
+import { describeExisting, findTransferByRef } from "@/lib/slip/dedupe";
 import { signSlip } from "@/lib/slip/sign";
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -28,8 +28,28 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient();
-  if (await findTransferByRef(admin, slip.refNo)) {
-    return NextResponse.json({ duplicate: true, error: "สลิปนี้ถูกบันทึกในระบบแล้ว" }, { status: 409 });
+
+  // สลิปนี้เคยถูกบันทึกแล้ว: ถ้าเป็นของเราก็แจ้ง ถ้ายังมีฝั่งว่างก็ให้เคลมได้
+  const existing = await findTransferByRef(admin, slip.refNo);
+  if (existing) {
+    const { alreadyMine, canClaim } = describeExisting(existing, user.id);
+    return NextResponse.json(
+      {
+        duplicate: true,
+        alreadyMine,
+        canClaim,
+        error: alreadyMine
+          ? "คุณบันทึกสลิปนี้ไว้แล้ว"
+          : canClaim
+          ? "สลิปนี้มีผู้อัพโหลดไว้แล้ว คุณสามารถขอเป็นคู่โอนของรายการนี้ได้"
+          : "สลิปนี้ถูกบันทึกในระบบแล้ว",
+        // ส่ง slip + token ให้เฉพาะกรณีเคลมได้ (ไม่อัพรูปซ้ำ จึงไม่มี slipPath)
+        ...(canClaim
+          ? { slip, token: signSlip({ ...slip, uid: user.id, slipPath: "" }) }
+          : {}),
+      },
+      { status: 409 }
+    );
   }
 
   const ext = file.type === "image/png" ? "png" : "jpg";
